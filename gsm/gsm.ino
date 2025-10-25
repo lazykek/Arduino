@@ -2,24 +2,27 @@
 SoftwareSerial sim(7, 8);
 SoftwareSerial esp(2, 3);
 
+const long SERIAL_BAUD = 115200;
+const long ESP_BAUD = 9600;
+const long SIM_BAUD = 9600;
+
 const char* SSID = "KazzHole";
 const char* PASSWORD = "Halyk##198";
+
+const char* PHONE = "+79969793617";
+
 const char* HOST = "api.open-meteo.com";
 const int PORT = 80;
 const char* PATH = "/v1/forecast?latitude=55.7558&longitude=37.6173&current_weather=true";
-const long ESP_BAUD = 9600;
+
 String lastResponse = "Last response";
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(SERIAL_BAUD);
   
-  // Инициализация ESP с очисткой буфера
-  initESP();
+  initModule(esp, ESP_BAUD);
+  initModule(sim, SIM_BAUD);
   
-  // Инициализация SIM
-  initModule(sim, 9600, "SIM", "AT");
-  
-  // Подключение к Wi-Fi
   connectToWiFi();
 }
 
@@ -31,35 +34,18 @@ void loop() {
     if (cmd == "HTTP") {
       sendHTTPRequest();
     } else if (cmd == "SMS") {
-      sendSMS("+79969793617", lastResponse);
+      sendSMS(PHONE, lastResponse);
     } else if (cmd == "LR") {
       Serial.println(lastResponse);
     } else {
-      sendCommand(esp, ESP_BAUD, "ESP", cmd, 2000);
+      sendCommand(esp, "ESP", cmd, 2000);
     }
   }
 }
 
-// Инициализация ESP с очисткой буфера
-void initESP() {
-  // ввести AT+UART_DEF=9600,8,1,0,0
-  esp.begin(ESP_BAUD);
-  delay(2000);
-  
-  // Очистка буфера перед началом работы
-  esp.listen();
-  while(esp.available()) {
-    esp.read(); // Просто очищаем буфер
-  }
-  
-  // Проверка связи
-  sendCommand(esp, ESP_BAUD, "ESP", "AT", 1000);
-  sendCommand(esp, ESP_BAUD, "ESP", "ATE0", 1000); // Отключить эхо
-}
-
 // Подключение к Wi-Fi
 void connectToWiFi() {
-  sendCommand(esp, ESP_BAUD, "ESP", "AT+CWMODE=1", 2000);
+  sendCommand(esp, "ESP", "AT+CWMODE=1", 2000);
   
   String connectCmd = "AT+CWJAP=\"";
   connectCmd += SSID;
@@ -67,20 +53,20 @@ void connectToWiFi() {
   connectCmd += PASSWORD;
   connectCmd += "\"";
   
-  sendCommand(esp, ESP_BAUD, "ESP", connectCmd, 15000);
+  sendCommand(esp, "ESP", connectCmd, 15000);
 }
 
 // Отправка HTTP-запроса
 void sendHTTPRequest() {
   // Закрываем предыдущие соединения
-  sendCommand(esp, ESP_BAUD, "ESP", "AT+CIPCLOSE", 1000);
+  sendCommand(esp, "ESP", "AT+CIPCLOSE", 1000);
   
   // Установка TCP-соединения
   String tcpCmd = "AT+CIPSTART=\"TCP\",\"";
   tcpCmd += HOST;
   tcpCmd += "\",";
   tcpCmd += PORT;
-  if (!sendCommand(esp, ESP_BAUD, "ESP", tcpCmd, 5000)) {
+  if (!sendCommand(esp, "ESP", tcpCmd, 5000)) {
     Serial.println("Connection failed");
     return;
   }
@@ -95,7 +81,7 @@ void sendHTTPRequest() {
   // Отправка команды на передачу данных
   String sendCmd = "AT+CIPSEND=";
   sendCmd += httpRequest.length();
-  if (!sendCommand(esp, ESP_BAUD, "ESP", sendCmd, 2000)) {
+  if (!sendCommand(esp, "ESP", sendCmd, 2000)) {
     return;
   }
   
@@ -143,21 +129,20 @@ void readHTTPResponse() {
 }
 
 // Инициализация модуля
-void initModule(SoftwareSerial &module, long speed, const char* name, const char* cmd) {
+void initModule(SoftwareSerial &module, long speed) {
   module.begin(speed);
   delay(1000);
   module.listen();
   while(module.available()) module.read();
-  module.println(cmd);
-  readResponse(module, name, 1000);
   module.stopListening();
 }
 
 // Отправка команды с возвратом статуса
-bool sendCommand(SoftwareSerial &module, long speed, const char* name, String cmd, unsigned long timeout) {
-  module.begin(speed);
-  delay(100);
-  module.listen();
+bool sendCommand(SoftwareSerial &module, const char* name, String cmd, unsigned long timeout) {
+  if (!module.listen()) {
+    Serial.println("Ошибка: модуль не смог начать прослушивание!");
+    return false;
+  };
   while(module.available()) module.read();
   module.println(cmd);
   String response = readResponse(module, name, timeout);
